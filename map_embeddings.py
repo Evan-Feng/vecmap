@@ -19,6 +19,7 @@ from cupy_utils import *
 import argparse
 import collections
 import numpy as np
+import pickle
 import re
 import sys
 import time
@@ -57,7 +58,9 @@ def main():
     parser.add_argument('src_input', help='the input source embeddings')
     parser.add_argument('trg_input', help='the input target embeddings')
     parser.add_argument('src_output', help='the output source embeddings')
-    parser.add_argument('trg_output', help='the output target embeddings')
+    parser.add_argument('-e', '--epochs', type=int, default=500, help='number of iterations')
+    parser.add_argument('--pickle', action='store_true', help='load embedding from pickled object')
+    parser.add_argument('--trg_output', help='the output target embeddings')
     parser.add_argument('--encoding', default='utf-8', help='the character encoding for input/output (defaults to utf-8)')
     parser.add_argument('--precision', choices=['fp16', 'fp32', 'fp64'], default='fp32', help='the floating-point precision (defaults to fp32)')
     parser.add_argument('--cuda', action='store_true', help='use cuda (requires cupy)')
@@ -142,10 +145,16 @@ def main():
         dtype = 'float64'
 
     # Read input embeddings
-    srcfile = open(args.src_input, encoding=args.encoding, errors='surrogateescape')
-    trgfile = open(args.trg_input, encoding=args.encoding, errors='surrogateescape')
-    src_words, x = embeddings.read(srcfile, dtype=dtype)
-    trg_words, z = embeddings.read(trgfile, dtype=dtype)
+    if args.pickle:
+        with open(args.src_input, 'rb') as fin:
+            src_words, x = pickle.load(fin)
+        with open(args.trg_input, 'rb') as fin:
+            trg_words, z = pickle.load(fin)
+    else:
+        srcfile = open(args.src_input, encoding=args.encoding, errors='surrogateescape')
+        trgfile = open(args.trg_input, encoding=args.encoding, errors='surrogateescape')
+        src_words, x = embeddings.read(srcfile, dtype=dtype)
+        trg_words, z = embeddings.read(trgfile, dtype=dtype)
 
     # NumPy/CuPy management
     if args.cuda:
@@ -269,7 +278,14 @@ def main():
     keep_prob = args.stochastic_initial
     t = time.time()
     end = not args.self_learning
+
+    epoch = 0
     while True:
+        epoch += 1
+        if epoch == args.epochs:
+            keep_prob = 1.0
+        if epoch == args.epochs + 50:
+            end = True
 
         # Increase the keep probability if we have not improve in args.stochastic_interval iterations
         if it - last_improvement > args.stochastic_interval:
@@ -410,12 +426,22 @@ def main():
         it += 1
 
     # Write mapped embeddings
-    srcfile = open(args.src_output, mode='w', encoding=args.encoding, errors='surrogateescape')
-    trgfile = open(args.trg_output, mode='w', encoding=args.encoding, errors='surrogateescape')
-    embeddings.write(src_words, xw, srcfile)
-    embeddings.write(trg_words, zw, trgfile)
-    srcfile.close()
-    trgfile.close()
+    # srcfile = open(args.src_output, mode='w', encoding=args.encoding, errors='surrogateescape')
+    # trgfile = open(args.trg_output, mode='w', encoding=args.encoding, errors='surrogateescape')
+    dic = {
+        'W_source': asnumpy(w),
+        'W_target': np.identity(300, dtype=np.float32),
+        'source_lang': 'en',
+        'target_lang': args.trg_input.split('/')[1][:2] if args.trg_input.endswith('.bin') else args.trg_input.split('/')[5:7],
+        'model': 'ubi',
+        'note': 'vecmap',
+    }
+    with open(args.src_output, 'wb') as fout:
+        pickle.dump(dic, fout)
+    # embeddings.write(src_words, xw, srcfile)
+    # embeddings.write(trg_words, zw, trgfile)
+    # srcfile.close()
+    # trgfile.close()
 
 
 if __name__ == '__main__':
